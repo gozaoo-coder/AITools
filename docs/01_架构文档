@@ -1,0 +1,142 @@
+```markdown
+# My-App 架构文档 (docs.md)
+
+> 版本：v0.1.0  
+> 最后更新：2025-07-29  
+> 目标：支持「在线云 + 离线本地」双模式的 Rust + Tauri + Vue 应用
+
+---
+
+## 1. 目录结构
+```
+my-app/
+├── shared/               # 公共 Rust 库（零重复）
+│   ├── Cargo.toml
+│   └── src/
+│       ├── lib.rs
+│       ├── models.rs     # DTO、Entity
+│       └── service.rs    # 纯业务逻辑
+├── server/               # 在线 Axum 服务器
+│   ├── Cargo.toml
+│   └── src/main.rs       # 仅路由 & 适配
+├── src-tauri/            # Tauri 桌面端
+│   ├── Cargo.toml
+│   ├── src/main.rs       # 仅 Tauri Command & 适配
+│   └── tauri.conf.json5  # 多窗口、插件配置
+├── src/                  # Vue3 + Vite 前端
+│   ├── main.ts
+│   └── App.vue
+├── dist/                 # 前端构建产物
+└── Cargo.toml            # 工作区 (workspace)
+```
+
+---
+
+## 2. 核心原则
+| 原则 | 做法 |
+|------|------|
+| **DRY** | 公共逻辑全部放入 `shared` crate，禁止复制粘贴 |
+| **单一职责** | server 只做 HTTP 适配；src-tauri 只做 Tauri Command 适配 |
+| **同构 API** | 前端调用 `/api/hello` 或 `invoke('hello_local')`，返回相同 JSON 结构 |
+
+---
+
+## 3. 共享库（shared）
+### 3.1 新增代码
+- 所有新增业务逻辑先写 `shared/src/service.rs`
+- 新增 DTO 写 `shared/src/models.rs`
+- 单元测试写在 `shared/tests/`
+
+### 3.2 依赖
+```toml
+[package]
+name = "shared"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+```
+
+---
+
+## 4. 在线服务器（server）
+### 4.1 运行
+```bash
+cd server
+cargo run   # 监听 0.0.0.0:3030
+```
+
+### 4.2 路由示例
+```rust
+use shared::service::build_hello;
+
+// GET /api/hello
+async fn hello_online() -> Json<shared::models::HelloResponse> {
+    Json(build_hello("cloud"))
+}
+```
+
+---
+
+## 5. 桌面客户端（src-tauri）
+### 5.1 运行
+```bash
+npm install
+npm run tauri dev
+```
+
+### 5.2 Tauri Command 示例
+```rust
+#[tauri::command]
+fn hello_local() -> String {
+    let res = shared::service::build_hello("local");
+    serde_json::to_string(&res).unwrap()
+}
+```
+
+### 5.3 前端切换
+```ts
+// src/App.vue
+import { invoke } from '@tauri-apps/api/core'
+import axios from 'axios'
+
+const online = () => axios.get('http://localhost:3030/api/hello')
+const local  = () => invoke('hello_local').then(JSON.parse)
+```
+
+---
+
+## 6. 构建 & 发布
+| 目标 | 命令 |
+|------|------|
+| 前端单独构建 | `npm run build` |
+| 桌面端打包 | `npm run tauri build` |
+| 在线服务器容器化 | `docker build -t my-app-server ./server` |
+
+---
+
+## 7. 工作区（根 Cargo.toml）
+```toml
+[workspace]
+members = ["shared", "server", "src-tauri"]
+resolver = "2"
+```
+
+---
+
+## 8. 后续扩展清单
+- [ ] 新增数据库实体 → 直接写在 `shared/entity/`
+- [ ] 新增插件 → 在 `src-tauri/Cargo.toml` 引入 `tauri-plugin-*`
+- [ ] 移动端 → 使用 `tauri ios init` / `android init`
+- [ ] 统一错误码 → 在 `shared/src/error.rs` 定义 `ApiError`
+- [ ] 自动生成 OpenAPI → 在 `server` 用 `utoipa`
+
+---
+
+## 9. 参考链接
+- Tauri 2 Docs: https://v2.tauri.app/
+- Axum Guide: https://docs.rs/axum/latest/axum/
+- Rust Workspace: https://doc.rust-lang.org/book/ch14-03-cargo-workspaces.html
+```
